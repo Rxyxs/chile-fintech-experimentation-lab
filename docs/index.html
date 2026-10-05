@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>chile-fintech-experimentation-lab</title>
+<meta name="description" content="A/B testing done the way a real experimentation platform has to do it: power analysis before launch, Sample Ratio Mismatch (SRM) detection, CUPED variance reduction, multiple-testi">
+<style>
+  :root { --bg:#FBFAF8; --surface:#FFF; --ink:#23201D; --muted:#6B645D; --line:#E3DED7; --accent:#B5553D; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+    --bg:#171614; --surface:#201E1B; --ink:#EDE9E3; --muted:#A9A29A; --line:#322E2A; --accent:#D9765C; } }
+  :root[data-theme="dark"] { --bg:#171614; --surface:#201E1B; --ink:#EDE9E3; --muted:#A9A29A; --line:#322E2A; --accent:#D9765C; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+    font:16px/1.68 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:900px; margin:0 auto; padding:0 16px 88px; }
+  header { padding:60px 0 32px; border-bottom:1px solid var(--line); margin-bottom:36px; }
+  h1 { font-size:clamp(1.7rem,5vw,2.4rem); line-height:1.16; margin:0 0 18px; letter-spacing:-.02em; }
+  .lede { font-size:clamp(1rem,2.3vw,1.1rem); color:var(--muted); margin:0 0 22px; max-width:62ch; }
+  .lede strong { color:var(--ink); }
+  .links a { display:inline-block; margin:0 9px 9px 0; padding:9px 15px; border:1px solid var(--line);
+    border-radius:7px; text-decoration:none; color:var(--ink); background:var(--surface); font-size:.9rem;
+    transition:border-color .15s; }
+  .links a:hover { border-color:var(--accent); }
+  h2 { font-size:1.3rem; margin:48px 0 8px; padding-top:12px; border-top:1px solid var(--line); letter-spacing:-.01em; }
+  figure { margin:22px 0; }
+  figure img { width:100%; height:auto; display:block; border:1px solid var(--line); border-radius:9px; background:#fff; }
+  figcaption { font-size:.85rem; color:var(--muted); margin-top:9px; max-width:70ch; }
+  p { margin:0 0 16px; max-width:70ch; }
+  code { background:var(--surface); border:1px solid var(--line); border-radius:4px; padding:1px 5px; font-size:.86em;
+    font-family:ui-monospace,SFMono-Regular,Consolas,monospace; }
+  footer { margin-top:60px; padding-top:22px; border-top:1px solid var(--line); font-size:.86rem; color:var(--muted); }
+  a { color:var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+<h1>chile-fintech-experimentation-lab</h1>
+<p class="lede">A/B testing done the way a real experimentation platform has to do it: power analysis before launch, Sample Ratio Mismatch (SRM) detection, CUPED variance reduction, multiple-testing correction across guardrail metrics, a novelty-effect check — and, as the centerpiece, an empirical calibration harness that runs each stopping rule thousands of times under a *known* ground truth to check whether it actually controls the error rate it claims to.</p>
+<div class="links">
+<a href="https://github.com/Rxyxs/chile-fintech-experimentation-lab">Code and method</a>
+<a href="https://github.com/Rxyxs/chile-fintech-experimentation-lab#readme">Full README</a>
+</div></header>
+<p>This page shows the project's results. The methodology, the design decisions and the limitations are documented in the repository's README.</p>
+<h2>chile-fintech-experimentation-lab</h2>
+<figure>
+<img src="figures/peeking_inflation_curve.png" alt="False-positive rate against the number of daily looks" loading="lazy">
+<figcaption>At a single look the test delivers what it promises (3.8%, consistent with the nominal 5%). The damage is done by the decision to keep looking, and it accumulates with each additional day.</figcaption>
+</figure>
+<h2>1. Power analysis</h2>
+<figure>
+<img src="figures/power_curve_mde.png" alt="Required sample size against minimum detectable effect" loading="lazy">
+<figcaption>Verified against a known textbook case in <code>tests/test_power.py</code>: baseline 20%, MDE +5pp absolute, alpha=0.05, power=0.80 reproduces <strong>1,091 per arm</strong>, matching Evan Miller&#x27;s public A/B testing sample-size calculator for the identical input, hand-checked from the pooled-variance formula. That validation point is the blue marker on the chart.</figcaption>
+</figure>
+<h2>3. CUPED variance reduction</h2>
+<figure>
+<img src="figures/cuped_variance_reduction.png" alt="CUPED variance reduction and its effect on the confidence interval" loading="lazy">
+<figcaption><strong>41.9% variance reduction</strong> using a pre-period revenue covariate. The pipeline specifies a correlation of 0.65; the realized correlation in the sample is ρ = 0.6474, so CUPED&#x27;s theoretical ceiling here is ρ² = <strong>41.92%</strong> — and the measured reduction is <strong>41.9168%</strong>, sitting exactly on the ceiling rather than short of it. (The reduction CUPED achieves *is* the empirical ρ², which is why the two agree to four decimals. The only gap worth naming is between the realized ρ and the 0.65 specified, which is ordinary sampling error in the correlation itself, not slack in the method.)</figcaption>
+</figure>
+<h2>4. Multiple-testing correction (BH-FDR) across 7 guardrail metrics</h2>
+<figure>
+<img src="figures/bh_fdr_guardrails.png" alt="Guardrail p-values against the BH critical line" loading="lazy">
+<figcaption>Read at a raw alpha=0.05, <strong>4 of 7</strong> metrics look significant. Under BH-FDR control, only <strong>1</strong> survives. Three of those four (latency, unsubscribe, support tickets) are exactly the guardrail metrics a launch decision should be most cautious about overreacting to — this is what the correction is for.</figcaption>
+</figure>
+<h2>5. Novelty-effect check</h2>
+<figure>
+<img src="figures/novelty_decay_vs_linear_fit.png" alt="Injected exponential decay against the fitted linear interaction" loading="lazy">
+<figcaption>Interaction coefficient -0.00433, p &lt; 0.0001 — correctly detects an injected decaying effect.</figcaption>
+</figure>
+<h2>6. Calibration: does each stopping rule control what it claims to?</h2>
+<figure>
+<img src="figures/calibration_false_positive_rate.png" alt="Empirical false-positive rate of each stopping rule against its nominal 5%" loading="lazy">
+<figcaption><strong>One caveat the figure makes visible and the table does not</strong>: the two Wilson intervals overlap ([20.3%, 28.7%] and [16.8%, 24.7%]). At 400 simulations the Bayesian rule is *not* distinguishable from the naive z-test — both are distinguishable from the 5% they claim, which is the finding, but &quot;Bayesian is better than naive&quot; is not something this evidence supports. Separating them would need more simulations.</figcaption>
+</figure>
+<footer>
+Pablo Reyes · <a href="https://github.com/Rxyxs/chile-fintech-experimentation-lab">github.com/Rxyxs/chile-fintech-experimentation-lab</a> · MIT<br><br>
+Every figure on this page is produced by the repository's pipeline. For the full method and its limitations, see the README.
+</footer>
+</div></body></html>
