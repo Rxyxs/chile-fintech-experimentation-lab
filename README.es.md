@@ -1,4 +1,4 @@
-[ 🇨🇱 Español ] | [ 🇺🇸 [Read in English](README.md) ]
+[[English](README.md) ] | [Español ]
 
 # chile-fintech-experimentation-lab
 
