@@ -12,8 +12,53 @@ from __future__ import annotations
 
 import numpy as np
 
+from src.msprt import always_valid_p_values
 from src.sequential import bayesian_probability_treatment_better, naive_peek_p_value
 from src.simulate import simulate_daily_conversion_experiment
+
+
+def daily_cumulative_counts(df) -> tuple[np.ndarray, ...]:
+    """Cumulative (successes_t, n_t, successes_c, n_c) at the end of each day."""
+    g = df.groupby(["day", "variant"])["converted"].agg(["sum", "size"]).unstack("variant", fill_value=0)
+    return (g[("sum", 1)].cumsum().to_numpy(), g[("size", 1)].cumsum().to_numpy(),
+            g[("sum", 0)].cumsum().to_numpy(), g[("size", 0)].cumsum().to_numpy())
+
+
+def calibrate_msprt(
+    n_simulations: int,
+    daily_n: int,
+    days: int,
+    baseline_rate: float,
+    tau: float,
+    true_effect_absolute: float = 0.0,
+    alpha: float = 0.05,
+    seed: int | None = None,
+) -> dict:
+    """Same protocol as `calibrate_naive_peeking`, with the mSPRT's always-valid
+    p-value checked every day instead of the fixed-horizon one. Under the null
+    its promise is that the share of simulations that ever cross `alpha` stays
+    at or below `alpha`, however many days there are.
+    """
+    rng = np.random.default_rng(seed)
+    stopping_days = []
+    for _ in range(n_simulations):
+        df = simulate_daily_conversion_experiment(
+            daily_n, days, baseline_rate, true_effect_absolute,
+            seed=int(rng.integers(0, 2**31 - 1)),
+        )
+        p = always_valid_p_values(*daily_cumulative_counts(df), tau=tau)
+        crossed = np.flatnonzero(p < alpha)
+        stopping_days.append(int(crossed[0]) if crossed.size else None)
+    stops = [d for d in stopping_days if d is not None]
+    return {
+        "n_simulations": n_simulations,
+        "nominal_alpha": alpha,
+        "tau": tau,
+        "empirical_false_positive_rate": len(stops) / n_simulations,
+        "rejection_rate": len(stops) / n_simulations,   # the same number, read as power when there is an effect
+        "early_stops": len(stops),
+        "median_stopping_day": float(np.median(stops)) if stops else None,
+    }
 
 
 def calibrate_naive_peeking(

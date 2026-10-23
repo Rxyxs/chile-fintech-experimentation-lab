@@ -6,7 +6,7 @@ A/B testing como lo tiene que hacer una plataforma de experimentación real: cá
 
 **Escenario**: una app fintech chilena prueba un *nudge* dentro de la app que ofrece auto-inscribir al usuario en un producto de ahorro, buscando subir la activación a 30 días. Todos los datos son simulados con un efecto conocido inyectado deliberadamente — la única forma de validar estas técnicas contra una respuesta real, ya que en un experimento real nunca se conoce la verdad de fondo. Cada número de abajo viene de una corrida real de `python -m src.pipeline` (seed 42).
 
-**El hallazgo principal**: revisar una prueba de alfa fijo todos los días en vez de una sola vez al tamaño de muestra planificado no infla la tasa de falsos positivos de 5% a 6% o 7% — la infla a **24.2%**. Cambiar a una regla de detención basada en probabilidad posterior bayesiana, comúnmente asumida como "segura para mirar seguido", casi no ayuda: **20.5%**. Ninguno de los dos métodos ingenuos es seguro. Ese es el punto de construir un arnés de calibración en vez de confiar en la garantía del libro de texto por fe.
+**El hallazgo principal**: revisar una prueba de alfa fijo todos los días en vez de una sola vez al tamaño de muestra planificado no infla la tasa de falsos positivos de 5% a 6% o 7% — la infla a **24.2%**. Cambiar a una regla de detención basada en probabilidad posterior bayesiana, comúnmente asumida como "segura para mirar seguido", casi no ayuda: **20.5%**. Ninguno de los dos métodos ingenuos es seguro. Ese es el punto de construir un arnés de calibración en vez de confiar en la garantía del libro de texto por fe. El SPRT de mezcla (`msprt.py`), un p-valor *always-valid* hecho para revisarse en cada mirada, se queda en **0,2%** bajo el mismo peeking diario, y la sección 7 repite todo esto sobre un experimento real de 14 millones de usuarios.
 
 La inflación no es una penalidad fija que se podría corregir de una vez — se acumula con cada mirada:
 
@@ -110,12 +110,60 @@ Este diagnóstico además tiene un límite de poder real y medido: al volumen di
 |---|---:|---:|
 | Peeking diario ingenuo (z-test de α fijo, revisado cada día) | 5% | **24.2%** (97/400) |
 | Secuencial bayesiano (detener cuando P(tratamiento mejor) > 0.95) | ~5% (asumido) | **20.5%** (82/400) |
+| p-valor always-valid del mSPRT (`msprt.py`, tau = el MDE planificado) | ≤ 5% (garantizado) | **0,2%** (1/400) |
 
 ![Tasa empírica de falsos positivos de cada regla de detención contra su 5% nominal](outputs/figures/calibration_false_positive_rate.png)
 
 **Una advertencia que la figura hace visible y la tabla no**: los dos intervalos de Wilson se solapan ([20.3%, 28.7%] y [16.8%, 24.7%]). Con 400 simulaciones la regla bayesiana *no* es distinguible del z-test ingenuo — ambas sí son distinguibles del 5% que prometen, que es el hallazgo, pero "la bayesiana es mejor que la ingenua" no es algo que esta evidencia sostenga. Separarlas requeriría más simulaciones.
 
-`tests/test_calibration.py` fija la inflación del método ingenuo como test de regresión (`> 10%`, muy por encima del 5% nominal). Ninguno de los dos métodos implementados aquí es una forma segura de monitorear un experimento a diario y detenerlo antes de tiempo — esa es la limitación honesta del alcance de este repo: un procedimiento *always-valid* completamente corregido (mixture-SPRT / Johari et al. 2015, o fronteras secuenciales de grupo tipo O'Brien-Fleming) es trabajo de ingeniería real más allá de lo construido acá, y es el módulo natural que sigue, en vez de algo que se asume silenciosamente ya resuelto.
+`tests/test_calibration.py` fija la inflación del método ingenuo como test de regresión (`> 10%`, muy por encima del 5% nominal). Ninguno de los dos métodos ingenuos es una forma segura de monitorear un experimento a diario y detenerlo antes. El SPRT de mezcla de Johari et al. (2017), en `msprt.py`, sí lo es: su p-valor es el mínimo acumulado del inverso de la razón de verosimilitud de mezcla, una martingala bajo la nula, así que la probabilidad de que cruce α *alguna vez* es a lo más α. Revisado todos los días sobre los mismos 400 experimentos nulos rechaza una vez (0,2%, intervalo de Wilson [0,04%; 1,4%]); `tests/test_msprt.py` verifica la forma cerrada y que se mantiene cerca de 5% donde el peeking ingenuo pasa de 10%. Acá es conservador porque 21 miradas son muchas menos que el monitoreo continuo que cubre su garantía.
+
+### 7. Un experimento real: la prueba de incrementalidad de Criteo con 14 millones de usuarios
+
+Todo lo anterior corre sobre datos simulados para que la verdad sea conocida. `src/real_criteo.py` hace la otra pregunta: ¿qué muestran los mismos chequeos sobre un experimento aleatorizado real, donde nadie escribió la verdad de antemano? Los datos son el benchmark de uplift v2.1 de Criteo AI Lab (Diemert et al., AdKDD 2018; CC BY-NC-SA 4.0): **13.979.592 usuarios** de una prueba de incrementalidad publicitaria, 85% expuestos a los avisos del anunciante y 15% excluidos, 12 variables anonimizadas medidas antes de la prueba y dos resultados en las dos semanas siguientes (visita y conversión).
+
+**Aleatorización: el chequeo SRM pasa, y eso es lo sospechoso.** Hay 11.882.655 usuarios tratados contra 11.882.653 esperados al 85%: una desviación de 2 usuarios, cuando el puro azar la dejaría típicamente a unos 1.335. Un aleatorizador justo cae tan cerca solo el 0,14% de las veces. Después, las variables previas a la prueba distinguen los brazos: las diferencias de medias estandarizadas llegan a −0,049 (f3) y −0,040 (f6), donde la aleatorización con 14 millones de usuarios dejaría unas 0,001, y un clasificador de gradient boosting predice el brazo desde las variables con un AUC de **0,5087**, 14 errores estándar sobre el 0,5 de una moneda justa. El archivo publicado se rebalanceó al diseño después del hecho. Un chequeo SRM no puede verlo; un chequeo de balance de covariables sí.
+
+**Los efectos** (intención de tratar, usuarios asignados a ver avisos contra usuarios excluidos):
+
+| | Control | Tratados | Diferencia (IC 95%) | Relativa |
+|---|---:|---:|---:|---:|
+| Visita | 3,820% | 4,854% | +1,034 pp [1,006; 1,063] | +27,1% |
+| Conversión | 0,194% | 0,309% | +0,115 pp [0,108; 0,122] | +59,4% |
+
+Solo el 3,6% de los tratados vio de verdad un aviso, así que por usuario expuesto (el cociente de Wald) el efecto es +28,7 puntos de probabilidad de visita y +3,2 puntos de conversión.
+
+**CUPED con variables reales mueve la estimación, no solo el intervalo:**
+
+![Efecto del tratamiento bajo cada ajuste](outputs/figures/real_adjustment_moves_the_estimate.png)
+
+| Ajuste | Visita: varianza menos | Visita: efecto | Conversión: varianza menos | Conversión: efecto |
+|---|---:|---:|---:|---:|
+| Ninguno | | 1,034 pp | | 0,115 pp |
+| CUPED, mejor variable | 24,5% | 0,786 pp | 9,8% | 0,107 pp |
+| Lineal, las 12 variables | 28,0% | 0,698 pp | 11,9% | 0,092 pp |
+| CUPAC (gradient boosting con cross-fitting) | 33,4% | 0,635 pp | 7,9% | 0,106 pp |
+
+El CUPED simulado de la sección 3 bajó la varianza en 41,9% y dejó la estimación donde estaba, como corresponde cuando los brazos están balanceados. En este archivo la varianza baja menos (8-33%), y la estimación misma cae hasta 39% en visitas, muy fuera del intervalo sin ajustar, porque los brazos difieren justamente en las variables con que se ajusta. Cuál número es el correcto depende de por qué difieren los brazos, y el archivo no lo dice; lo que sí dice es que "CUPED nunca cambia la estimación puntual" es una propiedad de una aleatorización limpia, no de CUPED.
+
+**Mirar seguido sobre filas reales.** 400 pruebas A/A por métrica, cada una con dos mitades aleatorias de los usuarios tratados (así que no hay diferencia verdadera), revisadas 30 veces con 10.000 usuarios por brazo en cada mirada:
+
+![Tasas de falsos positivos de cada regla en pruebas A/A reales](outputs/figures/real_aa_false_positive_rates.png)
+
+| Regla | Visita (base 4,9%) | Conversión (base 0,31%) |
+|---|---:|---:|
+| Peeking diario ingenuo | 28,7% | 30,5% |
+| Bayesiana, detener con P > 0,95 | 22,5% | 26,8% |
+| Horizonte fijo (una mirada) | 5,5% | 5,3% |
+| **mSPRT** | **2,0%** | **0,0%** |
+
+El hallazgo simulado se sostiene con datos reales y con un resultado raro: mirar todos los días una prueba hecha para mirarse una vez multiplica su tasa de error por unas seis veces, la regla bayesiana casi no ayuda, y el mSPRT se queda bajo 5% sea cual sea la métrica.
+
+**Lo que cuesta el mSPRT.** Pasando a los usuarios reales en 200 órdenes aleatorios, la prueba de horizonte fijo necesita 21.961 usuarios para detectar el efecto en visitas con 80% de poder, y 97.700 para conversiones. Con su escala de mezcla en el 10% de la tasa base, el mSPRT llega a una decisión antes de esa muestra en solo el 9% (visita) y el 0% (conversión) de los órdenes; su punto de detención mediano es 1,6 y 3,2 veces esa muestra:
+
+![Cuándo se detiene el mSPRT sobre los efectos reales](outputs/figures/real_msprt_stopping.png)
+
+El costo depende de la escala de mezcla: con 30% de la tasa base la mediana baja a 1,2× (visita) y 1,6× (conversión), con 100% a 1,4× y 1,3×, y la tasa de falsos positivos A/A se queda entre 0% y 3% en todos los casos. Poder mirar cuando uno quiera se paga en usuarios, y más cuando la suposición sobre el tamaño del efecto está lejos.
 
 ## El toolkit
 
@@ -129,6 +177,9 @@ Este diagnóstico además tiene un límite de poder real y medido: al volumen di
 | `sequential.py` | Un p-valor ingenuo de alfa fijo y una probabilidad posterior bayesiana Beta-Bernoulli, ambos calculables en cualquier momento del experimento |
 | `simulate.py` | Procesos generadores de datos con una verdad de fondo conocida y controlable — experimentos diarios de conversión binaria (con decaimiento de novedad opcional) y resultados continuos de una sola foto con covariable de período previo de correlación exacta |
 | `calibration.py` | Repite un experimento simulado completo miles de veces bajo la hipótesis nula para medir la tasa de falsos positivos real de cada regla de detención |
+| `msprt.py` | El test secuencial de razón de probabilidades de mezcla: un p-valor always-valid para dos proporciones que se puede revisar en cada mirada |
+| `real_criteo.py` | Sección 7: chequeos de aleatorización, efectos, CUPED/CUPAC, peeking A/A y detección con mSPRT sobre el experimento real de Criteo |
+| `real_figures.py` | Redibuja las figuras de la sección 7 desde `outputs/tables/real_criteo.json`, sin los datos |
 | `make_figures.py` | Redibuja cada figura de este README desde las mismas funciones, constantes y seed que usa el pipeline — nada acá es ilustrativo |
 
 ## Un bug real encontrado mientras se construía esto
@@ -145,9 +196,14 @@ Por separado, la primera versión de esa misma función usaba errores estándar 
 python -m venv .venv
 .venv/Scripts/activate   # o source .venv/bin/activate en Linux/macOS
 pip install -r requirements.txt
-python -m pytest -v        # 29 tests, ninguno mockeado
+python -m pytest -v        # 42 tests, ninguno mockeado
 python -m src.pipeline     # reporte completo, imprime en consola + outputs/tables/pipeline_report.json
 python -m src.make_figures # redibuja las seis figuras de arriba en outputs/figures/
+
+# Sección 7: ~340 MB desde Kaggle (el enlace propio de Criteo ya no responde), después ~8 minutos
+kaggle datasets download arashnic/uplift-modeling -p data/raw
+python -m src.real_criteo   # escribe outputs/tables/real_criteo.json
+python -m src.real_figures  # redibuja las figuras de la sección 7 desde ese archivo
 ```
 
 `make_figures.py` importa las mismas funciones y reutiliza las mismas constantes y seed (42) que `pipeline.py`, así que los números anotados en los gráficos son los números que imprime el pipeline. Correrlo es la forma de comprobarlo.

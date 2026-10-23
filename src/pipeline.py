@@ -13,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
-from src.calibration import calibrate_bayesian_sequential, calibrate_naive_peeking
+from src.calibration import calibrate_bayesian_sequential, calibrate_msprt, calibrate_naive_peeking
 from src.cuped import cuped_adjust
 from src.multiple_testing import benjamini_hochberg
 from src.novelty import detect_novelty_effect
@@ -104,7 +104,7 @@ def run() -> dict:
         "novelty_effect_detected": novelty_result["novelty_effect_detected"],
     }
 
-    section("6. Calibration: naive peeking vs. Bayesian sequential (under the null)")
+    section("6. Calibration: naive peeking vs. Bayesian sequential vs. mSPRT (under the null)")
     n_sims = 400
     naive_cal = calibrate_naive_peeking(
         n_simulations=n_sims, daily_n=150, days=21, baseline_rate=BASELINE_RATE,
@@ -114,13 +114,21 @@ def run() -> dict:
         n_simulations=n_sims, daily_n=150, days=21, baseline_rate=BASELINE_RATE,
         true_effect_absolute=0.0, seed=SEED,
     )
+    # tau = the planned MDE: the mSPRT is quickest at the effect size the test was designed for.
+    msprt_cal = calibrate_msprt(
+        n_simulations=n_sims, daily_n=150, days=21, baseline_rate=BASELINE_RATE,
+        tau=MDE_ABSOLUTE, true_effect_absolute=0.0, alpha=ALPHA, seed=SEED,
+    )
     print(f"Naive daily peeking, nominal alpha={ALPHA}:")
     print(f"  empirical false-positive rate: {naive_cal['empirical_false_positive_rate']:.1%}"
           f"  ({naive_cal['early_stops']}/{n_sims} simulations)")
     print(f"Bayesian sequential (stop at P>0.95), same {n_sims} simulations:")
     print(f"  empirical false-positive rate: {bayes_cal['empirical_false_positive_rate']:.1%}"
           f"  ({bayes_cal['declared_treatment_better']}/{n_sims} simulations)")
-    report["calibration"] = {"naive_peeking": naive_cal, "bayesian_sequential": bayes_cal}
+    print(f"mSPRT always-valid p-value (tau={MDE_ABSOLUTE}), same {n_sims} simulations:")
+    print(f"  empirical false-positive rate: {msprt_cal['empirical_false_positive_rate']:.1%}"
+          f"  ({msprt_cal['early_stops']}/{n_sims} simulations)")
+    report["calibration"] = {"naive_peeking": naive_cal, "bayesian_sequential": bayes_cal, "msprt": msprt_cal}
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     with open(OUTPUT_DIR / "pipeline_report.json", "w", encoding="utf-8") as f:

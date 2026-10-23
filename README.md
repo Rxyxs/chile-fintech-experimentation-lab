@@ -6,7 +6,7 @@ A/B testing done the way a real experimentation platform has to do it: power ana
 
 **Scenario**: a Chilean fintech app tests an in-app nudge that offers to auto-enroll users in a savings product, aiming to lift 30-day activation. All data is simulated with a known, deliberately injected effect — the only way any of these techniques can be validated against a real answer, since with a real experiment you never know the ground truth. Every number below is from an actual run of `python -m src.pipeline` (seed 42).
 
-**The headline finding**: checking a fixed-alpha test every day instead of once at the planned sample size doesn't inflate the false-positive rate from 5% to 6% or 7% — it inflates it to **24.2%**. Switching to a Bayesian posterior-probability stopping rule, commonly assumed to be "safe to peek", barely helps: **20.5%**. Neither naive method is safe. That's the point of building a calibration harness instead of trusting the textbook guarantee on faith.
+**The headline finding**: checking a fixed-alpha test every day instead of once at the planned sample size doesn't inflate the false-positive rate from 5% to 6% or 7% — it inflates it to **24.2%**. Switching to a Bayesian posterior-probability stopping rule, commonly assumed to be "safe to peek", barely helps: **20.5%**. Neither naive method is safe. That's the point of building a calibration harness instead of trusting the textbook guarantee on faith. The mixture SPRT (`msprt.py`), an always-valid p-value built to be checked at every look, stays at **0.2%** under the same daily peeking, and section 7 repeats all of this on a real 14-million-user experiment.
 
 The inflation is not a fixed penalty you could correct for once — it compounds with every look:
 
@@ -110,12 +110,60 @@ This diagnostic also has a real, measured power limit: at the pipeline's more re
 |---|---:|---:|
 | Naive daily peeking (fixed-α z-test, checked every day) | 5% | **24.2%** (97/400) |
 | Bayesian sequential (stop when P(treatment better) > 0.95) | ~5% (assumed) | **20.5%** (82/400) |
+| mSPRT always-valid p-value (`msprt.py`, tau = the planned MDE) | ≤ 5% (guaranteed) | **0.2%** (1/400) |
 
 ![Empirical false-positive rate of each stopping rule against its nominal 5%](outputs/figures/calibration_false_positive_rate.png)
 
 **One caveat the figure makes visible and the table does not**: the two Wilson intervals overlap ([20.3%, 28.7%] and [16.8%, 24.7%]). At 400 simulations the Bayesian rule is *not* distinguishable from the naive z-test — both are distinguishable from the 5% they claim, which is the finding, but "Bayesian is better than naive" is not something this evidence supports. Separating them would need more simulations.
 
-`tests/test_calibration.py` locks in the naive method's inflation as a regression test (`> 10%`, well above the nominal 5%). Neither of the two methods implemented here is a safe way to monitor an experiment daily and stop early — that is the honest limitation of this repo's scope: a fully corrected always-valid procedure (mixture-SPRT / Johari et al. 2015, or group-sequential O'Brien-Fleming boundaries) is real engineering work beyond what's built here, and is the natural next module rather than something silently assumed to already be solved.
+`tests/test_calibration.py` locks in the naive method's inflation as a regression test (`> 10%`, well above the nominal 5%). Neither of the two naive methods is a safe way to monitor an experiment daily and stop early. The mixture SPRT of Johari et al. (2017), in `msprt.py`, is: its p-value is the running minimum of the inverse mixture likelihood ratio, a martingale under the null, so the chance it *ever* crosses α is at most α. Checked every day on the same 400 null experiments it rejects once (0.2%, Wilson interval [0.04%, 1.4%]); `tests/test_msprt.py` checks the closed form and that it stays near 5% where naive peeking exceeds 10%. It is conservative here because 21 looks are far fewer than the continuous monitoring its guarantee covers.
+
+### 7. A real experiment: Criteo's 14-million-user incrementality test
+
+Everything above runs on simulated data so the truth is known. `src/real_criteo.py` asks the other question: what do the same checks show on a real randomized experiment, where nobody wrote the truth down? The data is Criteo AI Lab's uplift benchmark v2.1 (Diemert et al., AdKDD 2018; CC BY-NC-SA 4.0): **13,979,592 users** of an ad incrementality test, 85% shown the advertiser's ads and 15% held out, 12 anonymised features measured before the test, and two outcomes over the following two weeks (visit and conversion).
+
+**Randomization: the SRM check passes, and that is the suspicious part.** 11,882,655 users are treated against 11,882,653 expected at 85%: a deviation of 2 users when chance alone would typically put it about 1,335 away. A fair randomizer lands this close only 0.14% of the time. The pre-test features then tell the arms apart: standardized mean differences reach −0.049 (f3) and −0.040 (f6), where randomization on 14 million users would leave about 0.001, and a gradient-boosting classifier predicts the arm from the features with an AUC of **0.5087**, 14 standard errors above the 0.5 of a true coin flip. The released file was evidently rebalanced to the design after the fact. An SRM check cannot see that; a covariate balance check can.
+
+**The effects** (intention to treat, users assigned to see ads against users held out):
+
+| | Control | Treated | Difference (95% CI) | Relative |
+|---|---:|---:|---:|---:|
+| Visit | 3.820% | 4.854% | +1.034 pp [1.006, 1.063] | +27.1% |
+| Conversion | 0.194% | 0.309% | +0.115 pp [0.108, 0.122] | +59.4% |
+
+Only 3.6% of the treated users were actually exposed to an ad, so per exposed user (the Wald ratio) the effect is +28.7 points of visit probability and +3.2 points of conversion.
+
+**CUPED on real features moves the estimate, not only the interval:**
+
+![Treatment effect under each adjustment](outputs/figures/real_adjustment_moves_the_estimate.png)
+
+| Adjustment | Visit: variance cut | Visit: effect | Conversion: variance cut | Conversion: effect |
+|---|---:|---:|---:|---:|
+| None | | 1.034 pp | | 0.115 pp |
+| CUPED, best single feature | 24.5% | 0.786 pp | 9.8% | 0.107 pp |
+| Linear, all 12 features | 28.0% | 0.698 pp | 11.9% | 0.092 pp |
+| CUPAC (cross-fitted gradient boosting) | 33.4% | 0.635 pp | 7.9% | 0.106 pp |
+
+Section 3's simulated CUPED cut variance by 41.9% and left the estimate where it was, as it should when the arms are balanced. On this file the variance cut is smaller (8-33%), and the estimate itself falls by up to 39% for visits, far outside the unadjusted interval, because the arms differ on the very features being adjusted for. Which number is right depends on why the arms differ, which the file does not say; what it does say is that "CUPED never changes the point estimate" is a property of a clean randomization, not of CUPED.
+
+**Peeking on real rows.** 400 A/A tests per metric, each two random halves of the treated users (so there is no true difference), checked 30 times at 10,000 users per arm per look:
+
+![False-positive rates of each stopping rule on real A/A tests](outputs/figures/real_aa_false_positive_rates.png)
+
+| Rule | Visit (base 4.9%) | Conversion (base 0.31%) |
+|---|---:|---:|
+| Naive daily peeking | 28.7% | 30.5% |
+| Bayesian, stop at P > 0.95 | 22.5% | 26.8% |
+| Fixed horizon (one look) | 5.5% | 5.3% |
+| **mSPRT** | **2.0%** | **0.0%** |
+
+The simulated finding holds on real data and a rare outcome: looking every day at a test built to be looked at once multiplies its error rate by about six, the Bayesian rule barely helps, and the mSPRT stays under 5% whatever the metric.
+
+**What the mSPRT costs.** Streaming the real users in 200 random orders, the fixed-horizon test needs 21,961 users to detect the visit effect with 80% power, and 97,700 for conversions. With its mixing scale set to 10% of the base rate, the mSPRT reaches a decision by the fixed-horizon sample in only 9% (visit) and 0% (conversion) of the orders; its median stopping point is 1.6 and 3.2 times that sample:
+
+![When the mSPRT stops on the real effects](outputs/figures/real_msprt_stopping.png)
+
+The cost depends on the mixing scale: at 30% of the base rate the median falls to 1.2× (visit) and 1.6× (conversion), at 100% to 1.4× and 1.3×, and the A/A false-positive rate stays between 0% and 3% at every setting. Being allowed to look whenever you want is paid for in users, more so when the guess about the effect size is off.
 
 ## Toolkit
 
@@ -129,6 +177,9 @@ This diagnostic also has a real, measured power limit: at the pipeline's more re
 | `sequential.py` | A naive fixed-alpha p-value and a Bayesian Beta-Bernoulli posterior probability, both computable at any point in an experiment |
 | `simulate.py` | Data-generating processes with a known, controllable ground truth — daily binary-conversion experiments (with optional novelty decay) and single-snapshot continuous outcomes with an exact-correlation pre-period covariate |
 | `calibration.py` | Repeats a full simulated experiment thousands of times under the null to measure each stopping rule's real false-positive rate |
+| `msprt.py` | The mixture sequential probability ratio test: an always-valid p-value for two proportions that can be checked at every look |
+| `real_criteo.py` | Section 7: randomization checks, effects, CUPED/CUPAC, A/A peeking and mSPRT detection on Criteo's real experiment |
+| `real_figures.py` | Redraws section 7's figures from `outputs/tables/real_criteo.json`, without the data |
 | `make_figures.py` | Redraws every figure in this README from the same functions, constants and seed the pipeline uses — nothing here is illustrative |
 
 ## A real bug found while building this
@@ -145,9 +196,14 @@ Separately, the same function's first version used plain OLS standard errors on 
 python -m venv .venv
 .venv/Scripts/activate   # or source .venv/bin/activate on Linux/macOS
 pip install -r requirements.txt
-python -m pytest -v        # 29 tests, none mocked
+python -m pytest -v        # 42 tests, none mocked
 python -m src.pipeline     # full report, prints to console + outputs/tables/pipeline_report.json
 python -m src.make_figures # redraws the six figures above into outputs/figures/
+
+# Section 7: ~340 MB from Kaggle (Criteo's own link no longer resolves), then ~8 minutes
+kaggle datasets download arashnic/uplift-modeling -p data/raw
+python -m src.real_criteo   # writes outputs/tables/real_criteo.json
+python -m src.real_figures  # redraws section 7's figures from that file
 ```
 
 `make_figures.py` imports the same functions and reuses the same constants and seed (42) as `pipeline.py`, so the numbers annotated on the charts are the numbers the pipeline prints. Running it is how you check that.

@@ -3,3 +3,6 @@ __pycache__/
 *.pyc
 .pytest_cache/
 outputs/tables/*.json
+!outputs/tables/real_criteo.json
+# The Criteo file (340 MB zipped) is downloaded, never committed.
+data/raw/
