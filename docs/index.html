@@ -74,6 +74,20 @@
 <img src="figures/calibration_false_positive_rate.png" alt="Empirical false-positive rate of each stopping rule against its nominal 5%" loading="lazy">
 <figcaption><strong>One caveat the figure makes visible and the table does not</strong>: the two Wilson intervals overlap ([20.3%, 28.7%] and [16.8%, 24.7%]). At 400 simulations the Bayesian rule is <em>not</em> distinguishable from the naive z-test — both are distinguishable from the 5% they claim, which is the finding, but &quot;Bayesian is better than naive&quot; is not something this evidence supports. Separating them would need more simulations.</figcaption>
 </figure>
+<h2>7. A real experiment: Criteo&#x27;s 14-million-user incrementality test</h2>
+<p>The same checks on Criteo AI Lab&#x27;s uplift benchmark v2.1: 13,979,592 users, 85% shown ads and 15% held out. The 85/15 split is matched to within 2 users, which a fair randomizer does 0.14% of the time, while the pre-test features predict the arm (AUC 0.5087, 14 standard errors above chance): the file was rebalanced, which an SRM check cannot see and a covariate balance check can.</p>
+<figure>
+<img src="figures/real_adjustment_moves_the_estimate.png" alt="Treatment effect under each adjustment" loading="lazy">
+<figcaption>Because the arms differ on the pre-test features, adjusting for them moves the visit effect from 1.034 to 0.64-0.79 points, outside the unadjusted interval, while cutting variance 8-33% (41.9% in the simulation, where the estimate does not move).</figcaption>
+</figure>
+<figure>
+<img src="figures/real_aa_false_positive_rates.png" alt="False-positive rates on real A/A tests" loading="lazy">
+<figcaption>400 A/A tests per metric on real users, 30 looks each: naive daily peeking 28.7% and 30.5%, the Bayesian rule 22.5% and 26.8%, the fixed-horizon test 5.5% and 5.3%, the mSPRT 2.0% and 0.0%.</figcaption>
+</figure>
+<figure>
+<img src="figures/real_msprt_stopping.png" alt="When the mSPRT stops on the real effects" loading="lazy">
+<figcaption>The price of being allowed to look: with its mixing scale at 10% of the base rate, the mSPRT stops at a median of 1.6 (visit) and 3.2 (conversion) times the fixed-horizon sample; 1.2-1.6 times at other settings.</figcaption>
+</figure>
 <footer>
 Pablo Reyes · <a href="https://github.com/Rxyxs/chile-fintech-experimentation-lab">github.com/Rxyxs/chile-fintech-experimentation-lab</a> · MIT<br><br>
 Every figure on this page is produced by the repository's pipeline. For the full method and its limitations, see the README.
