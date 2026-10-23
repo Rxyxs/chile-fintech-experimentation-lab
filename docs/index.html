@@ -57,7 +57,7 @@
 <h2>3. CUPED variance reduction</h2>
 <figure>
 <img src="figures/cuped_variance_reduction.png" alt="CUPED variance reduction and its effect on the confidence interval" loading="lazy">
-<figcaption><strong>41.9% variance reduction</strong> using a pre-period revenue covariate. The pipeline specifies a correlation of 0.65; the realized correlation in the sample is ρ = 0.6474, so CUPED&#x27;s theoretical ceiling here is ρ² = <strong>41.92%</strong> — and the measured reduction is <strong>41.9168%</strong>, sitting exactly on the ceiling rather than short of it. (The reduction CUPED achieves *is* the empirical ρ², which is why the two agree to four decimals. The only gap worth naming is between the realized ρ and the 0.65 specified, which is ordinary sampling error in the correlation itself, not slack in the method.)</figcaption>
+<figcaption><strong>41.9% variance reduction</strong> using a pre-period revenue covariate. The pipeline specifies a correlation of 0.65; the realized correlation in the sample is ρ = 0.6474, so CUPED&#x27;s theoretical ceiling here is ρ² = <strong>41.92%</strong> — and the measured reduction is <strong>41.9168%</strong>, sitting exactly on the ceiling rather than short of it. (The reduction CUPED achieves <em>is</em> the empirical ρ², which is why the two agree to four decimals. The only gap worth naming is between the realized ρ and the 0.65 specified, which is ordinary sampling error in the correlation itself, not slack in the method.)</figcaption>
 </figure>
 <h2>4. Multiple-testing correction (BH-FDR) across 7 guardrail metrics</h2>
 <figure>
@@ -72,7 +72,7 @@
 <h2>6. Calibration: does each stopping rule control what it claims to?</h2>
 <figure>
 <img src="figures/calibration_false_positive_rate.png" alt="Empirical false-positive rate of each stopping rule against its nominal 5%" loading="lazy">
-<figcaption><strong>One caveat the figure makes visible and the table does not</strong>: the two Wilson intervals overlap ([20.3%, 28.7%] and [16.8%, 24.7%]). At 400 simulations the Bayesian rule is *not* distinguishable from the naive z-test — both are distinguishable from the 5% they claim, which is the finding, but &quot;Bayesian is better than naive&quot; is not something this evidence supports. Separating them would need more simulations.</figcaption>
+<figcaption><strong>One caveat the figure makes visible and the table does not</strong>: the two Wilson intervals overlap ([20.3%, 28.7%] and [16.8%, 24.7%]). At 400 simulations the Bayesian rule is <em>not</em> distinguishable from the naive z-test — both are distinguishable from the 5% they claim, which is the finding, but &quot;Bayesian is better than naive&quot; is not something this evidence supports. Separating them would need more simulations.</figcaption>
 </figure>
 <footer>
 Pablo Reyes · <a href="https://github.com/Rxyxs/chile-fintech-experimentation-lab">github.com/Rxyxs/chile-fintech-experimentation-lab</a> · MIT<br><br>
