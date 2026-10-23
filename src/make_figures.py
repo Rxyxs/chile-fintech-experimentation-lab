@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy import stats
 
-from src.calibration import calibrate_bayesian_sequential, calibrate_naive_peeking
+from src.calibration import calibrate_bayesian_sequential, calibrate_msprt, calibrate_naive_peeking
 from src.cuped import cuped_adjust
 from src.multiple_testing import benjamini_hochberg
 from src.novelty import detect_novelty_effect
@@ -88,14 +88,19 @@ def figure_calibration(n_sims=400):
         n_simulations=n_sims, daily_n=150, days=21, baseline_rate=BASELINE_RATE,
         true_effect_absolute=0.0, seed=SEED,
     )
+    msprt = calibrate_msprt(
+        n_simulations=n_sims, daily_n=150, days=21, baseline_rate=BASELINE_RATE,
+        tau=MDE_ABSOLUTE, true_effect_absolute=0.0, alpha=ALPHA, seed=SEED,
+    )
 
-    labels = ["Nominal\n(what both claim)", "Naive daily peeking\n(fixed-α z-test)",
-              "Bayesian sequential\nP(treat. better) > 0.95"]
-    rates = [ALPHA, naive["empirical_false_positive_rate"], bayes["empirical_false_positive_rate"]]
-    hits = [None, naive["early_stops"], bayes["declared_treatment_better"]]
-    colors = [OK, TREAT, ACCENT]
+    labels = ["Nominal\n(what all claim)", "Naive daily peeking\n(fixed-α z-test)",
+              "Bayesian sequential\nP(treat. better) > 0.95", "mSPRT\n(always-valid p-value)"]
+    rates = [ALPHA, naive["empirical_false_positive_rate"], bayes["empirical_false_positive_rate"],
+             msprt["empirical_false_positive_rate"]]
+    hits = [None, naive["early_stops"], bayes["declared_treatment_better"], msprt["early_stops"]]
+    colors = [OK, TREAT, ACCENT, CONTROL]
 
-    fig, ax = plt.subplots(figsize=(8.2, 5))
+    fig, ax = plt.subplots(figsize=(9.6, 5))
     bars = ax.bar(labels, rates, color=colors, width=0.58, edgecolor="white", linewidth=1.2)
 
     for bar, rate, hit in zip(bars, rates, hits):
@@ -120,11 +125,11 @@ def figure_calibration(n_sims=400):
     ax.yaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(xmax=1, decimals=0))
     fig.text(0.5, -0.07,
              f"{n_sims} simulated experiments per rule, 21 days x 150 users/arm/day, seed {SEED}.\n"
-             "Intervals are Wilson score intervals. Note they overlap: at this number of simulations\n"
-             "the two naive rules are not distinguishable from each other, only from the 5% they claim.",
+             "Intervals are Wilson score intervals. The two naive rules overlap each other and are far from\n"
+             "the 5% they claim; the mSPRT, checked just as often, stays under it.",
              ha="center", fontsize=8.5, color="#666666")
     _save(fig, "calibration_false_positive_rate.png")
-    return naive, bayes
+    return naive, bayes, msprt
 
 
 # --------------------------------------------------------------------------
@@ -133,8 +138,12 @@ def figure_calibration(n_sims=400):
 def figure_peeking_inflation(n_sims=400):
     print("2/6 peeking_inflation_curve ...")
     day_grid = [1, 2, 3, 5, 8, 11, 14, 17, 21]
-    rates, los, his = [], [], []
+    rates, los, his, m_rates = [], [], [], []
     for d in day_grid:
+        m_rates.append(calibrate_msprt(
+            n_simulations=n_sims, daily_n=150, days=d, baseline_rate=BASELINE_RATE,
+            tau=MDE_ABSOLUTE, true_effect_absolute=0.0, alpha=ALPHA, seed=SEED,
+        )["empirical_false_positive_rate"])
         res = calibrate_naive_peeking(
             n_simulations=n_sims, daily_n=150, days=d, baseline_rate=BASELINE_RATE,
             true_effect_absolute=0.0, alpha=ALPHA, seed=SEED,
@@ -147,6 +156,8 @@ def figure_peeking_inflation(n_sims=400):
     ax.fill_between(day_grid, los, his, color=TREAT, alpha=0.16, linewidth=0)
     ax.plot(day_grid, rates, color=TREAT, linewidth=2, marker="o", markersize=5,
             markerfacecolor="white", markeredgewidth=1.6, label="Fixed-α z-test, checked once per day")
+    ax.plot(day_grid, m_rates, color=CONTROL, linewidth=2, marker="s", markersize=4.5,
+            markerfacecolor="white", markeredgewidth=1.4, label="mSPRT always-valid p-value, checked once per day")
     ax.axhline(ALPHA, color=OK, linestyle="--", linewidth=1.3,
                label="Nominal α = 5% (what the test promises)")
 
@@ -379,7 +390,7 @@ def figure_novelty():
 
 if __name__ == "__main__":
     print(f"Writing figures to {FIG_DIR}\n")
-    naive, bayes = figure_calibration()
+    naive, bayes, msprt = figure_calibration()
     figure_peeking_inflation()
     figure_power_curve()
     cuped, rho = figure_cuped()
@@ -391,6 +402,8 @@ if __name__ == "__main__":
           f"({naive['early_stops']}/400)")
     print(f"  bayesian sequential FPR: {bayes['empirical_false_positive_rate']:.1%} "
           f"({bayes['declared_treatment_better']}/400)")
+    print(f"  mSPRT FPR              : {msprt['empirical_false_positive_rate']:.1%} "
+          f"({msprt['early_stops']}/400)")
     print(f"  CUPED reduction        : {cuped['variance_reduction_pct']:.4f}%  "
           f"(realized rho={rho:.4f}, rho^2={rho ** 2:.4%})")
     print(f"  BH guardrails          : {n_raw} below raw alpha -> {n_bh} survive BH")
